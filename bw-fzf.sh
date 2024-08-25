@@ -49,15 +49,12 @@ function load_items() {
 }
 
 function bw_list() {
-  local log_file temp_file prompt
-
-  log_file=$(mktemp)
-  echo "$ITEMS" | jq '.' >"$log_file"
+  local temp_file prompt
 
   temp_file=$(mktemp)
   echo "$ITEMS" >"$temp_file"
 
-  chmod 600 "$temp_file" "$log_file"
+  chmod 600 "$temp_file"
 
   if [ -n "$SEARCH_TERM" ]; then
     prompt="bw-fzf (filter: $SEARCH_TERM) ➜ "
@@ -68,38 +65,46 @@ function bw_list() {
   jq -r '.[] | "\(.name) (\(.id)) \(.login.username)"' "$temp_file" |
     FZF_PREVIEW_FILE="$temp_file" fzf --cycle --inline-info --ansi --no-mouse --layout=reverse --prompt="$prompt" \
       --preview='
-            item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
-            item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
-            username=$(echo "$item" | jq -r ".login.username | @sh")
-            password=$(echo "$item" | jq -r ".login.password | @sh")
-            notes=$(echo "$item" | jq -r ".notes // empty | @sh")
-            creationDate=$(echo "$item" | jq -r ".creationDate | @sh")
-            revisionDate=$(echo "$item" | jq -r ".revisionDate | @sh")
-            uris=$(echo "$item" | jq -r ".login.uris[].uri | @sh" | sed "s/^/- /")
+        item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
 
-            totp_available=$(echo "$item" | jq -r ".login.totp != null")
+        item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
 
-            if [ "$totp_available" = "true" ]; then
-                clear
-                totp_secret=$(echo "$item" | jq -r ".login.totp")
-                if command -v oathtool &> /dev/null; then
-                    totp=$(oathtool --totp -b "$totp_secret")
-                else
-                    totp=$(bw get totp "$item_id")
-                fi
+        username=$(echo "$item" | jq -r ".login.username | @sh")
+        password=$(echo "$item" | jq -r ".login.password | @sh")
+        notes=$(echo "$item" | jq -r ".notes // empty | @sh")
+        creationDate=$(echo "$item" | jq -r ".creationDate | @sh")
+        revisionDate=$(echo "$item" | jq -r ".revisionDate | @sh")
+        uris=$(echo "$item" | jq -r ".login.uris[].uri | @sh" | sed "s/^/- /")
+
+        totp_available=$(echo "$item" | jq -r ".login.totp != null")
+
+        if [ "$totp_available" = "true" ]; then
+            clear
+            totp_secret=$(echo "$item" | jq -r ".login.totp")
+            if command -v oathtool &> /dev/null; then
+                totp=$(oathtool --totp -b "$totp_secret")
             else
-                totp="No TOTP available for this login."
+                totp=$(bw get totp "$item_id")
             fi
+        else
+            totp="No TOTP available for this login."
+        fi
 
-            bold=$(tput bold)
-            normal=$(tput sgr0)
-            cyan=$(tput setaf 6)
+        bold=$(tput bold)
+        normal=$(tput sgr0)
+        cyan=$(tput setaf 6)
+        red=$(tput setaf 1)
 
-            printf "${bold}${cyan}username:${normal} %s\n${bold}${cyan}password:${normal} %s\n${bold}${cyan}totp:${normal} %s\n${bold}${cyan}notes:${normal} %s\n${bold}${cyan}creationDate:${normal} %s\n${bold}${cyan}revisionDate:${normal} %s\n${bold}${cyan}uris:${normal}\n%s" \
-                   "$username" "$password" "$totp" "$notes" "$creationDate" "$revisionDate" "$uris"
-        '
+        printf "${bold}${cyan}username:${normal} %s\n" "$username"
+        printf "${bold}${cyan}password:${normal} %s\n" "${red}$password${normal}"
+        printf "${bold}${cyan}totp:${normal} %s\n" "$totp"
+        printf "${bold}${cyan}notes:${normal} %s\n" "$notes"
+        printf "${bold}${cyan}creationDate:${normal} %s\n" "$creationDate"
+        printf "${bold}${cyan}revisionDate:${normal} %s\n" "$revisionDate"
+        printf "${bold}${cyan}uris:${normal}\n%s" "$uris"
+      '
 
-  rm "$temp_file" "$log_file"
+  rm "$temp_file"
 }
 
 function install_script() {
