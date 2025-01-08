@@ -8,6 +8,7 @@ A Bitwarden cli wrapper with fzf
 - [`fzf`](https://github.com/junegunn/fzf)
 - [`jq`](https://github.com/jqlang/jq)
 - [`oathtool`](https://www.nongnu.org/oath-toolkit/) (optional, for OTP code generation)
+- [`xclip`](https://github.com/astrand/xclip) (optional, for copying items to clipboard)
 
 ## Installation
 
