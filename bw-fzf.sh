@@ -6,14 +6,62 @@ trap 'cleanup' EXIT
 ITEMS=
 TIMEOUT=60s
 SEARCH_TERM=
+SESSION_FILE="$HOME/.bw-fzf-session"
 
 function cleanup() {
-  unset BW_SESSION
   reset
 }
 
+function check_session() {
+  if [[ -n "${BW_SESSION}" ]]; then
+    if bw unlock --check --quiet 2>/dev/null; then
+      echo "Using existing session from environment"
+      return 0
+    fi
+  fi
+
+  if [[ -f "$SESSION_FILE" ]]; then
+    export BW_SESSION=$(cat "$SESSION_FILE")
+    if bw unlock --check --quiet 2>/dev/null; then
+      echo "Using existing session from file"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+function handle_session_save() {
+  read -p "Do you want to save this session? [y/N] " save_session
+  local session
+
+  session=$(echo "$password" | bw unlock --raw 2>/dev/null)
+  if [[ -z "$session" ]]; then
+    echo "Could not unlock vault"
+    exit 1
+  fi
+
+  case $save_session in
+  [Yy]*)
+    echo "Saving session..."
+    echo "$session" >"$SESSION_FILE"
+    chmod 600 "$SESSION_FILE"
+    echo "Session saved to $SESSION_FILE"
+    ;;
+  *)
+    echo "Session will not be saved"
+    ;;
+  esac
+
+  export BW_SESSION="$session"
+  echo "Unlocked!"
+}
+
 function ask_password() {
-  local password session
+  local password
+
+  if check_session; then
+    return 0
+  fi
 
   if command -v systemd-ask-password &>/dev/null; then
     password=$(systemd-ask-password "Password: ")
@@ -22,13 +70,7 @@ function ask_password() {
     echo
   fi
 
-  export BW_SESSION=$(echo "$password" | bw unlock --raw 2>/dev/null)
-  if [[ -z "$BW_SESSION" ]]; then
-    echo "Could not unlock vault"
-    exit 1
-  else
-    echo "Unlocked!"
-  fi
+  handle_session_save
 }
 
 function load_items() {
