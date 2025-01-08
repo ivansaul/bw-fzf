@@ -1,15 +1,42 @@
 #!/bin/bash
 
-trap 'trap - INT; kill -s HUP -- -$$' INT
+trap 'exit_handler' INT TERM
 trap 'cleanup' EXIT
 
 ITEMS=
 TIMEOUT=60s
 SEARCH_TERM=
 SESSION_FILE="$HOME/.bw-fzf-session"
+TIMEOUT_PID=
+TIMESTAMP_FILE="/tmp/bw-fzf-active.timestamp"
+
+function exit_handler() {
+  trap - INT TERM
+  cleanup
+  exit 1
+}
 
 function cleanup() {
-  reset
+  if [[ -n "$TIMEOUT_PID" ]]; then
+    kill "$TIMEOUT_PID" 2>/dev/null || true
+  fi
+  rm -f "$TIMESTAMP_FILE" 2>/dev/null
+
+  pkill -P $$ 2>/dev/null || true
+}
+
+function monitor_inactivity() {
+  rm -f "$TIMESTAMP_FILE"
+  touch "$TIMESTAMP_FILE"
+  while true; do
+    sleep 1
+    if [[ -f "$TIMESTAMP_FILE" ]]; then
+      if [[ $(expr "$(date +%s)" - "$(stat -c %Y "$TIMESTAMP_FILE")") -ge ${TIMEOUT%s} ]]; then
+        exit_handler
+      fi
+    fi
+  done &
+  TIMEOUT_PID=$!
 }
 
 function check_session() {
@@ -90,12 +117,13 @@ function load_items() {
   echo "Items loaded successfully."
 }
 
+export -f monitor_inactivity
+
 function bw_list() {
   local temp_file prompt
 
   temp_file=$(mktemp)
   echo "$ITEMS" >"$temp_file"
-
   chmod 600 "$temp_file"
 
   if [ -n "$SEARCH_TERM" ]; then
@@ -104,11 +132,17 @@ function bw_list() {
     prompt="bw-fzf ➜ "
   fi
 
+  monitor_inactivity
+
   jq -r '.[] | "\(.name) (\(.id)) \(.login.username)"' "$temp_file" |
-    FZF_PREVIEW_FILE="$temp_file" fzf --cycle --inline-info --ansi --no-mouse --layout=reverse --prompt="$prompt" \
+    FZF_PREVIEW_FILE="$temp_file" fzf \
+      --cycle --inline-info --ansi --no-mouse --layout=reverse \
+      --prompt="$prompt" \
+      --bind="change:execute-silent(touch $TIMESTAMP_FILE)" \
+      --bind="focus:execute-silent(touch $TIMESTAMP_FILE)" \
       --preview='
         item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
-
+        touch '"$TIMESTAMP_FILE"'
         item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
 
         username=$(echo "$item" | jq -r ".login.username | @sh")
@@ -223,7 +257,7 @@ function main() {
     exit 1
   fi
 
-  (sleep "$TIMEOUT" && kill $$) &
+  monitor_inactivity
 
   ask_password
   load_items "$SEARCH_TERM"
