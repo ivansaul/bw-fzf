@@ -9,6 +9,7 @@ SEARCH_TERM=
 SESSION_FILE="$HOME/.bw-fzf-session"
 TIMEOUT_PID=
 TIMESTAMP_FILE="/tmp/bw-fzf-active.timestamp"
+TEMP_ITEMS_FILE=
 
 function exit_handler() {
   trap - INT TERM
@@ -19,10 +20,14 @@ function exit_handler() {
 function cleanup() {
   if [[ -n "$TIMEOUT_PID" ]]; then
     kill "$TIMEOUT_PID" 2>/dev/null || true
+    wait "$TIMEOUT_PID" 2>/dev/null || true
   fi
+
   rm -f "$TIMESTAMP_FILE" 2>/dev/null
+  rm -f "$TEMP_ITEMS_FILE" 2>/dev/null
 
   pkill -P $$ 2>/dev/null || true
+  wait 2>/dev/null || true
 }
 
 function monitor_inactivity() {
@@ -32,7 +37,9 @@ function monitor_inactivity() {
     sleep 1
     if [[ -f "$TIMESTAMP_FILE" ]]; then
       if [[ $(expr "$(date +%s)" - "$(stat -c %Y "$TIMESTAMP_FILE")") -ge ${TIMEOUT%s} ]]; then
-        exit_handler
+        echo -e "\nSession timed out after ${TIMEOUT}"
+        cleanup
+        exit 1
       fi
     fi
   done &
@@ -120,11 +127,11 @@ function load_items() {
 export -f monitor_inactivity
 
 function bw_list() {
-  local temp_file prompt
+  local prompt
 
-  temp_file=$(mktemp)
-  echo "$ITEMS" >"$temp_file"
-  chmod 600 "$temp_file"
+  TEMP_ITEMS_FILE=$(mktemp)
+  echo "$ITEMS" >"$TEMP_ITEMS_FILE"
+  chmod 600 "$TEMP_ITEMS_FILE"
 
   if [ -n "$SEARCH_TERM" ]; then
     prompt="bw-fzf (filter: $SEARCH_TERM) ➜ "
@@ -134,8 +141,8 @@ function bw_list() {
 
   monitor_inactivity
 
-  jq -r '.[] | "\(.name) (\(.id)) \(.login.username)"' "$temp_file" |
-    FZF_PREVIEW_FILE="$temp_file" fzf \
+  jq -r '.[] | "\(.name) (\(.id)) \(.login.username)"' "$TEMP_ITEMS_FILE" |
+    FZF_PREVIEW_FILE="$TEMP_ITEMS_FILE" fzf \
       --cycle --inline-info --ansi --no-mouse --layout=reverse \
       --prompt="$prompt" \
       --bind="change:execute-silent(touch $TIMESTAMP_FILE)" \
@@ -180,7 +187,7 @@ function bw_list() {
         printf "${bold}${cyan}uris:${normal}\n%s" "$uris"
       '
 
-  rm "$temp_file"
+  rm "$TEMP_ITEMS_FILE"
 }
 
 function install_script() {
