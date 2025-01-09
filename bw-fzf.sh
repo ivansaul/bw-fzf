@@ -11,6 +11,15 @@ TIMEOUT_PID=
 TIMESTAMP_FILE="/tmp/bw-fzf-active.timestamp"
 TEMP_ITEMS_FILE=
 
+# Determine the clipboard command based on the session type
+if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+    CLIP_COMMAND="wl-copy"
+    CLIP_ARGS=""
+else
+    CLIP_COMMAND="xclip"
+    CLIP_ARGS="-selection clipboard"
+fi
+
 function exit_handler() {
   trap - INT TERM
   cleanup
@@ -147,9 +156,9 @@ function bw_list() {
       --prompt="$prompt" \
       --bind="change:execute-silent(touch $TIMESTAMP_FILE)" \
       --bind="focus:execute-silent(touch $TIMESTAMP_FILE)" \
-      --bind="u:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); username=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.username' \"$TEMP_ITEMS_FILE\"); echo -n \"\$username\" | xclip -selection clipboard)+execute-silent(touch $TIMESTAMP_FILE)" \
-      --bind="p:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); password=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.password' \"$TEMP_ITEMS_FILE\"); echo -n \"\$password\" | xclip -selection clipboard)+execute-silent(touch $TIMESTAMP_FILE)" \
-      --bind="o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); if [[ \"\$totp_secret\" != \"null\" ]]; then if command -v oathtool &> /dev/null; then totp=\$(oathtool --totp -b \"\$totp_secret\"); else totp=\$(bw get totp \"\$item_id\"); fi; echo -n \"\$totp\" | xclip -selection clipboard; else echo \"No TOTP available for this item\"; fi)+execute-silent(touch $TIMESTAMP_FILE)" \
+      --bind="u:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); username=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.username' \"$TEMP_ITEMS_FILE\"); echo -n \"\$username\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)" \
+      --bind="p:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); password=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.password' \"$TEMP_ITEMS_FILE\"); echo -n \"\$password\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)" \
+      --bind="o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); if [[ \"\$totp_secret\" != \"null\" ]]; then if command -v oathtool &> /dev/null; then totp=\$(oathtool --totp -b \"\$totp_secret\"); else totp=\$(bw get totp \"\$item_id\"); fi; echo -n \"\$totp\" | $CLIP_COMMAND $CLIP_ARGS; else echo \"No TOTP available for this item\"; fi)+execute-silent(touch $TIMESTAMP_FILE)" \
       --header="(↑ ↓: select) (u: copy username) (p: copy password) (o: copy totp)" \
       --preview='
         item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
@@ -266,6 +275,11 @@ function main() {
   if ! command -v fzf >/dev/null; then
     echo "fzf is missing. Exiting"
     exit 1
+  fi
+
+  # Check for clipboard command availability
+  if ! command -v $CLIP_COMMAND >/dev/null; then
+    echo "WARNING: $CLIP_COMMAND is missing. Copy functionality will be unavailable"
   fi
 
   monitor_inactivity
