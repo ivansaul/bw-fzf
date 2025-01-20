@@ -150,6 +150,30 @@ function bw_list() {
 
   monitor_inactivity
 
+  # Define help text as a variable
+  local HELP_TEXT="
+    Keyboard Shortcuts:
+    ------------------
+    ctrl-h        Show this help window
+    ctrl-u        Copy username to clipboard
+    ctrl-p        Copy password to clipboard
+    ctrl-o        Copy TOTP code to clipboard
+
+    Navigation:
+    ----------
+    ↑/↓          Select item
+    Enter        Select item
+    Page Up/Down Scroll preview window
+    /            Filter items
+    ESC          Clear filter/Exit
+
+    Tips:
+    -----
+    • Type to filter entries
+    • All copied items go to system clipboard
+    • Session times out after ${TIMEOUT} of inactivity
+    "
+
   jq -r '.[] | "\(.name) (\(.id)) \(.login.username)"' "$TEMP_ITEMS_FILE" |
     FZF_PREVIEW_FILE="$TEMP_ITEMS_FILE" fzf \
       --cycle --inline-info --ansi --no-mouse --layout=reverse \
@@ -159,47 +183,52 @@ function bw_list() {
       --bind="ctrl-u:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); username=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.username' \"$TEMP_ITEMS_FILE\"); echo -n \"\$username\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)" \
       --bind="ctrl-p:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); password=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.password' \"$TEMP_ITEMS_FILE\"); echo -n \"\$password\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)" \
       --bind="ctrl-o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); if [[ \"\$totp_secret\" != \"null\" ]]; then if command -v oathtool &> /dev/null; then totp=\$(oathtool --totp -b \"\$totp_secret\"); else totp=\$(bw get totp \"\$item_id\"); fi; echo -n \"\$totp\" | $CLIP_COMMAND $CLIP_ARGS; else echo \"No TOTP available for this item\"; fi)+execute-silent(touch $TIMESTAMP_FILE)" \
-      --header="(↑ ↓: select) (ctrl-u: copy username) (ctrl-p: copy password) (ctrl-o: copy totp)" \
+      --bind="ctrl-h:preview(echo \"$HELP_TEXT\")" \
+      --header="Press ctrl-h for help" \
+      --preview-window='right:50%' \
       --preview='
-        item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
-        touch '"$TIMESTAMP_FILE"'
-        item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
-
-        username=$(echo "$item" | jq -r ".login.username | @sh")
-        password=$(echo "$item" | jq -r ".login.password | @sh")
-        notes=$(echo "$item" | jq -r ".notes // empty | @sh")
-        creationDate=$(echo "$item" | jq -r ".creationDate | @sh")
-        revisionDate=$(echo "$item" | jq -r ".revisionDate | @sh")
-        uris=$(echo "$item" | jq -r ".login.uris[].uri | @sh" | sed "s/^/- /")
-
-        totp_available=$(echo "$item" | jq -r ".login.totp != null")
-
-        if [ "$totp_available" = "true" ]; then
-            clear
-            totp_secret=$(echo "$item" | jq -r ".login.totp")
-            if command -v oathtool &> /dev/null; then
-                totp=$(oathtool --totp -b "$totp_secret")
-            else
-                totp=$(bw get totp "$item_id")
-            fi
+        if [[ "{}" == "HELP" ]]; then
+          echo "$HELP_TEXT"
         else
-            totp="No TOTP available for this login."
+          item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
+          touch '"$TIMESTAMP_FILE"'
+          item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
+
+          username=$(echo "$item" | jq -r ".login.username | @sh")
+          password=$(echo "$item" | jq -r ".login.password | @sh")
+          notes=$(echo "$item" | jq -r ".notes // empty | @sh")
+          creationDate=$(echo "$item" | jq -r ".creationDate | @sh")
+          revisionDate=$(echo "$item" | jq -r ".revisionDate | @sh")
+          uris=$(echo "$item" | jq -r ".login.uris[].uri | @sh" | sed "s/^/- /")
+
+          totp_available=$(echo "$item" | jq -r ".login.totp != null")
+
+          if [ "$totp_available" = "true" ]; then
+              clear
+              totp_secret=$(echo "$item" | jq -r ".login.totp")
+              if command -v oathtool &> /dev/null; then
+                  totp=$(oathtool --totp -b "$totp_secret")
+              else
+                  totp=$(bw get totp "$item_id")
+              fi
+          else
+              totp="No TOTP available for this login."
+          fi
+
+          bold=$(tput bold)
+          normal=$(tput sgr0)
+          cyan=$(tput setaf 6)
+          red=$(tput setaf 1)
+
+          printf "${bold}${cyan}username:${normal} %s\n" "$username"
+          printf "${bold}${cyan}password:${normal} %s\n" "${red}$password${normal}"
+          printf "${bold}${cyan}totp:${normal} %s\n" "$totp"
+          printf "${bold}${cyan}notes:${normal} %s\n" "$notes"
+          printf "${bold}${cyan}creationDate:${normal} %s\n" "$creationDate"
+          printf "${bold}${cyan}revisionDate:${normal} %s\n" "$revisionDate"
+          printf "${bold}${cyan}uris:${normal}\n%s" "$uris"
         fi
-
-        bold=$(tput bold)
-        normal=$(tput sgr0)
-        cyan=$(tput setaf 6)
-        red=$(tput setaf 1)
-
-        printf "${bold}${cyan}username:${normal} %s\n" "$username"
-        printf "${bold}${cyan}password:${normal} %s\n" "${red}$password${normal}"
-        printf "${bold}${cyan}totp:${normal} %s\n" "$totp"
-        printf "${bold}${cyan}notes:${normal} %s\n" "$notes"
-        printf "${bold}${cyan}creationDate:${normal} %s\n" "$creationDate"
-        printf "${bold}${cyan}revisionDate:${normal} %s\n" "$revisionDate"
-        printf "${bold}${cyan}uris:${normal}\n%s" "$uris"
       '
-
   rm "$TEMP_ITEMS_FILE"
 }
 
