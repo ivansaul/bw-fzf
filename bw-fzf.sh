@@ -201,16 +201,8 @@ function bw_list() {
             revisionDate=$(echo "$item" | jq -r ".revisionDate")
             uris=$(echo "$item" | jq -r ".login.uris[].uri" | sed "s/^/  • /")
 
-          totp_available=$(echo "$item" | jq -r ".login.totp != null")
-          totp_available=$(echo "$item" | jq -r ".login.totp != null")
-
             totp_available=$(echo "$item" | jq -r ".login.totp != null")
-
-          if [ "$totp_available" = "true" ]; then
-          if [ "$totp_available" = "true" ]; then
-              clear
             if [ "$totp_available" = "true" ]; then
-              clear
                 totp_secret=$(echo "$item" | jq -r ".login.totp")
                 if command -v oathtool &> /dev/null; then
                     totp=$(oathtool --totp -b "$totp_secret")
@@ -239,7 +231,6 @@ function bw_list() {
             printf "${padding}${bold}${cyan}Modified${normal}\n${padding}  %s\n" "$revisionDate"
         fi
     '
-  rm "$TEMP_ITEMS_FILE"
 }
 
 function install_script() {
