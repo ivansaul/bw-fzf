@@ -13,11 +13,11 @@ TEMP_ITEMS_FILE=
 
 # Determine the clipboard command based on the session type
 if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
-    CLIP_COMMAND="wl-copy"
-    CLIP_ARGS=""
+  CLIP_COMMAND="wl-copy"
+  CLIP_ARGS=""
 else
-    CLIP_COMMAND="xclip"
-    CLIP_ARGS="-selection clipboard"
+  CLIP_COMMAND="xclip"
+  CLIP_ARGS="-selection clipboard"
 fi
 
 function exit_handler() {
@@ -188,47 +188,57 @@ function bw_list() {
       --preview-window='right:50%' \
       --preview='
         if [[ "{}" == "HELP" ]]; then
-          echo "$HELP_TEXT"
+            echo "$HELP_TEXT"
         else
-          item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
-          touch '"$TIMESTAMP_FILE"'
-          item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
+            item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
+            touch '"$TIMESTAMP_FILE"'
+            item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
 
-          username=$(echo "$item" | jq -r ".login.username | @sh")
-          password=$(echo "$item" | jq -r ".login.password | @sh")
-          notes=$(echo "$item" | jq -r ".notes // empty | @sh")
-          creationDate=$(echo "$item" | jq -r ".creationDate | @sh")
-          revisionDate=$(echo "$item" | jq -r ".revisionDate | @sh")
-          uris=$(echo "$item" | jq -r ".login.uris[].uri | @sh" | sed "s/^/- /")
+            username=$(echo "$item" | jq -r ".login.username")
+            password=$(echo "$item" | jq -r ".login.password")
+            notes=$(echo "$item" | jq -r ".notes // empty")
+            creationDate=$(echo "$item" | jq -r ".creationDate")
+            revisionDate=$(echo "$item" | jq -r ".revisionDate")
+            uris=$(echo "$item" | jq -r ".login.uris[].uri" | sed "s/^/  • /")
 
           totp_available=$(echo "$item" | jq -r ".login.totp != null")
+          totp_available=$(echo "$item" | jq -r ".login.totp != null")
+
+            totp_available=$(echo "$item" | jq -r ".login.totp != null")
 
           if [ "$totp_available" = "true" ]; then
+          if [ "$totp_available" = "true" ]; then
               clear
-              totp_secret=$(echo "$item" | jq -r ".login.totp")
-              if command -v oathtool &> /dev/null; then
-                  totp=$(oathtool --totp -b "$totp_secret")
-              else
-                  totp=$(bw get totp "$item_id")
-              fi
-          else
-              totp="No TOTP available for this login."
-          fi
+            if [ "$totp_available" = "true" ]; then
+              clear
+                totp_secret=$(echo "$item" | jq -r ".login.totp")
+                if command -v oathtool &> /dev/null; then
+                    totp=$(oathtool --totp -b "$totp_secret")
+                else
+                    totp=$(bw get totp "$item_id")
+                fi
+            else
+                totp="No TOTP available"
+            fi
 
-          bold=$(tput bold)
-          normal=$(tput sgr0)
-          cyan=$(tput setaf 6)
-          red=$(tput setaf 1)
+            bold=$(tput bold)
+            normal=$(tput sgr0)
+            cyan=$(tput setaf 6)
+            red=$(tput setaf 1)
+            underline=$(tput smul)
+            nounderline=$(tput rmul)
+            padding="  "
 
-          printf "${bold}${cyan}username:${normal} %s\n" "$username"
-          printf "${bold}${cyan}password:${normal} %s\n" "${red}$password${normal}"
-          printf "${bold}${cyan}totp:${normal} %s\n" "$totp"
-          printf "${bold}${cyan}notes:${normal} %s\n" "$notes"
-          printf "${bold}${cyan}creationDate:${normal} %s\n" "$creationDate"
-          printf "${bold}${cyan}revisionDate:${normal} %s\n" "$revisionDate"
-          printf "${bold}${cyan}uris:${normal}\n%s" "$uris"
+            printf "\n${padding}${bold}${underline}Login Details${nounderline}${normal}\n\n"
+            printf "${padding}${bold}${cyan}Username${normal}\n${padding}  %s\n\n" "$username"
+            printf "${padding}${bold}${cyan}Password${normal}\n${padding}  ${red}%s${normal}\n\n" "$password"
+            printf "${padding}${bold}${cyan}TOTP${normal}\n${padding}  %s\n\n" "$totp"
+            printf "${padding}${bold}${cyan}Notes${normal}\n${padding}  %s\n\n" "$notes"
+            printf "${padding}${bold}${cyan}URIs${normal}\n%s\n\n" "$uris"
+            printf "${padding}${bold}${cyan}Created${normal}\n${padding}  %s\n" "$creationDate"
+            printf "${padding}${bold}${cyan}Modified${normal}\n${padding}  %s\n" "$revisionDate"
         fi
-      '
+    '
   rm "$TEMP_ITEMS_FILE"
 }
 
