@@ -194,16 +194,16 @@ function bw_list() {
             touch '"$TIMESTAMP_FILE"'
             item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
 
-            username=$(echo "$item" | jq -r ".login.username")
-            password=$(echo "$item" | jq -r ".login.password")
-            notes=$(echo "$item" | jq -r ".notes // empty")
-            creationDate=$(echo "$item" | jq -r ".creationDate")
-            revisionDate=$(echo "$item" | jq -r ".revisionDate")
-            uris=$(echo "$item" | jq -r ".login.uris[].uri" | sed "s/^/  • /")
+            username=$(jq -r ".login.username" <<< $item)
+            password=$(jq -r ".login.password" <<< $item)
+            notes=$(jq -r ".notes // empty" <<< $item)
+            creationDate=$(jq -r ".creationDate" <<< $item)
+            revisionDate=$(jq -r ".revisionDate" <<< $item)
+            uris=$(jq -r ".login.uris[]?.uri // empty" <<< "$item" | sed "s/^/  • /")
 
-            totp_available=$(echo "$item" | jq -r ".login.totp != null")
+            totp_available=$(jq -r ".login.totp != null" <<< $item)
             if [ "$totp_available" = "true" ]; then
-                totp_secret=$(echo "$item" | jq -r ".login.totp")
+                totp_secret=$(jq -r ".login.totp" <<< $item)
                 if command -v oathtool &> /dev/null; then
                     totp=$(oathtool --totp -b "$totp_secret")
                 else
