@@ -10,6 +10,7 @@ SESSION_FILE="$HOME/.bw-fzf-session"
 TIMEOUT_PID=
 TIMESTAMP_FILE="/tmp/bw-fzf-active.timestamp"
 TEMP_ITEMS_FILE=
+NO_PREVIEW=0
 
 # Determine the clipboard command based on the session type
 if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
@@ -174,25 +175,39 @@ function bw_list() {
     • Session times out after ${TIMEOUT} of inactivity
     "
 
-  jq -r '.[] | "\(.name) (\(.id)) \(.login.username)"' "$TEMP_ITEMS_FILE" |
-    FZF_PREVIEW_FILE="$TEMP_ITEMS_FILE" fzf \
-      --cycle --inline-info --ansi --no-mouse --layout=reverse \
-      --prompt="$prompt" \
-      --bind="change:execute-silent(touch $TIMESTAMP_FILE)" \
-      --bind="focus:execute-silent(touch $TIMESTAMP_FILE)" \
-      --bind="ctrl-u:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); username=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.username' \"$TEMP_ITEMS_FILE\"); echo -n \"\$username\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)" \
-      --bind="ctrl-p:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); password=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.password' \"$TEMP_ITEMS_FILE\"); echo -n \"\$password\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)" \
-      --bind="ctrl-o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); if [[ \"\$totp_secret\" != \"null\" ]]; then if command -v oathtool &> /dev/null; then totp=\$(oathtool --totp -b \"\$totp_secret\"); else totp=\$(bw get totp \"\$item_id\"); fi; echo -n \"\$totp\" | $CLIP_COMMAND $CLIP_ARGS; else echo \"No TOTP available for this item\"; fi)+execute-silent(touch $TIMESTAMP_FILE)" \
-      --bind="ctrl-h:preview(echo \"$HELP_TEXT\")" \
-      --header="Press ctrl-h for help" \
-      --preview-window='right:50%' \
+  local fzf_args=(
+    --cycle
+    --inline-info
+    --ansi
+    --no-mouse
+    --layout=reverse
+    --prompt="$prompt"
+    --bind="change:execute-silent(touch $TIMESTAMP_FILE)"
+    --bind="focus:execute-silent(touch $TIMESTAMP_FILE)"
+    --bind="ctrl-u:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); username=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.username' \"$TEMP_ITEMS_FILE\"); echo -n \"\$username\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
+    --bind="ctrl-p:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); password=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.password' \"$TEMP_ITEMS_FILE\"); echo -n \"\$password\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
+    --bind="ctrl-o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); if [[ \"\$totp_secret\" != \"null\" ]]; then if command -v oathtool &> /dev/null; then totp=\$(oathtool --totp -b \"\$totp_secret\"); else totp=\$(bw get totp \"\$item_id\"); fi; echo -n \"\$totp\" | $CLIP_COMMAND $CLIP_ARGS; else echo \"No TOTP available for this item\"; fi)+execute-silent(touch $TIMESTAMP_FILE)"
+  )
+
+  # If preview is disabled, set a blank preview and hide the preview window.
+  # Otherwise, use the standard item preview.
+  if [ "$NO_PREVIEW" -eq 1 ]; then
+    fzf_args+=(
+      --header="Press ctrl-h for help"
+      --preview=""
+      --preview-window=hidden
+    )
+  else
+    fzf_args+=(
+      --header="Press ctrl-h for help"
+      --preview-window='right:50%'
       --preview='
         if [[ "{}" == "HELP" ]]; then
-            echo "$HELP_TEXT"
+            echo "'"$HELP_TEXT"'"
         else
             item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
             touch '"$TIMESTAMP_FILE"'
-            item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "$FZF_PREVIEW_FILE")
+            item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "'"$TEMP_ITEMS_FILE"'")
 
             username=$(jq -r ".login.username" <<< $item)
             password=$(jq -r ".login.password" <<< $item)
@@ -230,7 +245,14 @@ function bw_list() {
             printf "${padding}${bold}${cyan}Created${normal}\n${padding}  %s\n" "$creationDate"
             printf "${padding}${bold}${cyan}Modified${normal}\n${padding}  %s\n" "$revisionDate"
         fi
-    '
+      '
+    )
+  fi
+
+  fzf_args+=(--bind="ctrl-h:preview(echo \"$HELP_TEXT\")")
+
+  jq -r '.[] | "\(.name) (\(.id)) \(.login.username)"' "$TEMP_ITEMS_FILE" |
+    FZF_PREVIEW_FILE="$TEMP_ITEMS_FILE" fzf "${fzf_args[@]}"
 }
 
 function install_script() {
@@ -261,6 +283,7 @@ function help() {
   echo "  -h, --help       Show this help message"
   echo "  -t, --timeout    Set custom timeout (e.g., 30s, 1m). Default is 1 minute."
   echo "  -s, --search     Search term to filter items"
+  echo "  -n, --no-preview Disable preview window"
   echo
 }
 
@@ -282,6 +305,9 @@ function main() {
     -s | --search)
       shift
       SEARCH_TERM="$1"
+      ;;
+    -n | --no-preview)
+      NO_PREVIEW=1
       ;;
     *)
       echo "Invalid option: $1"
