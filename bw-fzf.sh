@@ -16,6 +16,9 @@ NO_PREVIEW=0
 if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
   CLIP_COMMAND="wl-copy"
   CLIP_ARGS=""
+elif [[ $(uname) == "Darwin" ]]; then
+  CLIP_COMMAND="pbcopy"
+  CLIP_ARGS=""
 else
   CLIP_COMMAND="xclip"
   CLIP_ARGS="-selection clipboard"
