@@ -8,6 +8,7 @@ TIMEOUT=60s
 SEARCH_TERM=
 SESSION_FILE="$HOME/.bw-fzf-session"
 TIMEOUT_PID=
+REFRESH_PID=
 TIMESTAMP_FILE="/tmp/bw-fzf-active.timestamp"
 TEMP_ITEMS_FILE=
 NO_PREVIEW=0
@@ -26,22 +27,34 @@ fi
 
 export PYTHON_TOTP_SCRIPT='
 import sys, urllib.parse, base64, hmac, hashlib, struct, time, re
-raw = sys.argv[1].strip() if len(sys.argv) > 1 else ""
+
+args = sys.argv[1:]
+raw_only = "--raw" in args
+clean_args = [a for a in args if a != "--raw"]
+raw = clean_args[0].strip() if clean_args else ""
+
 if not raw or raw == "null":
-    print("No TOTP available")
+    print("No TOTP available" if not raw_only else "")
     sys.exit(0)
+
 secret = urllib.parse.parse_qs(urllib.parse.urlparse(raw).query).get("secret", [raw])[0] if raw.startswith("otpauth://") else raw
 secret = re.sub(r"\s+", "", secret).upper()
 secret += "=" * ((8 - len(secret) % 8) % 8)
+
 try:
     key = base64.b32decode(secret)
-    msg = struct.pack(">Q", int(time.time()) // 30)
+    now = int(time.time())
+    remaining = 30 - (now % 30)
+    msg = struct.pack(">Q", now // 30)
     h = hmac.new(key, msg, hashlib.sha1).digest()
     o = h[-1] & 0x0F
     code = (struct.unpack(">I", h[o:o+4])[0] & 0x7FFFFFFF) % 1000000
-    print(f"{code:06d}")
+    if raw_only:
+        print(f"{code:06d}")
+    else:
+        print(f"{code:06d} [{remaining}s]")
 except Exception:
-    print("Invalid Secret")
+    print("Invalid Secret" if not raw_only else "")
 '
 
 function exit_handler() {
@@ -54,6 +67,11 @@ function cleanup() {
   if [[ -n "$TIMEOUT_PID" ]]; then
     kill "$TIMEOUT_PID" 2>/dev/null || true
     wait "$TIMEOUT_PID" 2>/dev/null || true
+  fi
+
+  if [[ -n "$REFRESH_PID" ]]; then
+    kill "$REFRESH_PID" 2>/dev/null || true
+    wait "$REFRESH_PID" 2>/dev/null || true
   fi
 
   rm -f "$TIMESTAMP_FILE" 2>/dev/null
@@ -91,6 +109,8 @@ function monitor_inactivity() {
   done &
   TIMEOUT_PID=$!
 }
+
+export -f monitor_inactivity 2>/dev/null || true
 
 function check_session() {
   if [[ -n "${BW_SESSION}" ]]; then
@@ -170,10 +190,9 @@ function load_items() {
   echo "Items loaded successfully."
 }
 
-export -f monitor_inactivity
-
 function bw_list() {
   local prompt
+  local listen_port=$((RANDOM % 10000 + 50000))
 
   TEMP_ITEMS_FILE=$(mktemp)
   echo "$ITEMS" >"$TEMP_ITEMS_FILE"
@@ -187,7 +206,17 @@ function bw_list() {
 
   monitor_inactivity
 
-  # Define help text as a variable
+  # Background process to force preview refresh every second
+  if [ "$NO_PREVIEW" -eq 0 ] && command -v curl &>/dev/null; then
+    (
+      while kill -0 $$ 2>/dev/null; do
+        sleep 1
+        curl -s -XPOST "http://127.0.0.1:$listen_port" -d "refresh-preview" >/dev/null 2>&1 || true
+      done
+    ) &
+    REFRESH_PID=$!
+  fi
+
   local HELP_TEXT="
     Keyboard Shortcuts:
     ------------------
@@ -212,6 +241,7 @@ function bw_list() {
     "
 
   local fzf_args=(
+    --listen="$listen_port"
     --cycle
     --inline-info
     --ansi
@@ -222,7 +252,7 @@ function bw_list() {
     --bind="focus:execute-silent(touch $TIMESTAMP_FILE)"
     --bind="ctrl-u:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); username=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.username' \"$TEMP_ITEMS_FILE\"); echo -n \"\$username\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
     --bind="ctrl-p:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); password=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.password' \"$TEMP_ITEMS_FILE\"); echo -n \"\$password\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
-    --bind="ctrl-o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); totp=\$(python3 -c \"\$PYTHON_TOTP_SCRIPT\" \"\$totp_secret\"); echo -n \"\$totp\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
+    --bind="ctrl-o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); totp=\$(python3 -c \"\$PYTHON_TOTP_SCRIPT\" --raw \"\$totp_secret\"); echo -n \"\$totp\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
   )
 
   # If preview is disabled, set a blank preview and hide the preview window.
@@ -242,7 +272,6 @@ function bw_list() {
             echo "'"$HELP_TEXT"'"
         else
             item_id=$(echo {} | sed -n "s/.*(\(.*\)).*/\1/p")
-            touch '"$TIMESTAMP_FILE"'
             item=$(jq -r --arg id "$item_id" ".[] | select(.id == \$id)" "'"$TEMP_ITEMS_FILE"'")
 
             username=$(jq -r ".login.username" <<< $item)
@@ -367,14 +396,18 @@ function main() {
     exit 1
   fi
 
-  # Check for clipboard command availability
-  if ! command -v $CLIP_COMMAND >/dev/null; then
-    echo "WARNING: $CLIP_COMMAND is missing. Copy functionality will be unavailable"
-  fi
-
   if ! command -v python3 >/dev/null; then
     echo "python3 is missing. Exiting"
     exit 1
+  fi
+
+  if ! command -v curl >/dev/null; then
+    echo "curl is missing. Exiting"
+    exit 1
+  fi
+
+  if ! command -v $CLIP_COMMAND >/dev/null; then
+    echo "WARNING: $CLIP_COMMAND is missing. Copy functionality will be unavailable"
   fi
 
   monitor_inactivity
