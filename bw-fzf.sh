@@ -24,6 +24,26 @@ else
   CLIP_ARGS="-selection clipboard"
 fi
 
+export PYTHON_TOTP_SCRIPT='
+import sys, urllib.parse, base64, hmac, hashlib, struct, time, re
+raw = sys.argv[1].strip() if len(sys.argv) > 1 else ""
+if not raw or raw == "null":
+    print("No TOTP available")
+    sys.exit(0)
+secret = urllib.parse.parse_qs(urllib.parse.urlparse(raw).query).get("secret", [raw])[0] if raw.startswith("otpauth://") else raw
+secret = re.sub(r"\s+", "", secret).upper()
+secret += "=" * ((8 - len(secret) % 8) % 8)
+try:
+    key = base64.b32decode(secret)
+    msg = struct.pack(">Q", int(time.time()) // 30)
+    h = hmac.new(key, msg, hashlib.sha1).digest()
+    o = h[-1] & 0x0F
+    code = (struct.unpack(">I", h[o:o+4])[0] & 0x7FFFFFFF) % 1000000
+    print(f"{code:06d}")
+except Exception:
+    print("Invalid Secret")
+'
+
 function exit_handler() {
   trap - INT TERM
   cleanup
@@ -202,7 +222,7 @@ function bw_list() {
     --bind="focus:execute-silent(touch $TIMESTAMP_FILE)"
     --bind="ctrl-u:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); username=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.username' \"$TEMP_ITEMS_FILE\"); echo -n \"\$username\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
     --bind="ctrl-p:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); password=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.password' \"$TEMP_ITEMS_FILE\"); echo -n \"\$password\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
-    --bind="ctrl-o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); if [[ \"\$totp_secret\" != \"null\" ]]; then if command -v oathtool &> /dev/null; then totp=\$(oathtool --totp -b \"\$totp_secret\"); else totp=\$(bw get totp \"\$item_id\"); fi; echo -n \"\$totp\" | $CLIP_COMMAND $CLIP_ARGS; else echo \"No TOTP available for this item\"; fi)+execute-silent(touch $TIMESTAMP_FILE)"
+    --bind="ctrl-o:execute(item_id=\$(echo {} | sed -n 's/.*(\(.*\)).*/\1/p'); totp_secret=\$(jq -r --arg id \"\$item_id\" '.[] | select(.id == \$id) | .login.totp' \"$TEMP_ITEMS_FILE\"); totp=\$(python3 -c \"\$PYTHON_TOTP_SCRIPT\" \"\$totp_secret\"); echo -n \"\$totp\" | $CLIP_COMMAND $CLIP_ARGS)+execute-silent(touch $TIMESTAMP_FILE)"
   )
 
   # If preview is disabled, set a blank preview and hide the preview window.
@@ -232,17 +252,8 @@ function bw_list() {
             revisionDate=$(jq -r ".revisionDate" <<< $item)
             uris=$(jq -r ".login.uris[]?.uri // empty" <<< "$item" | sed "s/^/  • /")
 
-            totp_available=$(jq -r ".login.totp != null" <<< $item)
-            if [ "$totp_available" = "true" ]; then
-                totp_secret=$(jq -r ".login.totp" <<< $item)
-                if command -v oathtool &> /dev/null; then
-                    totp=$(oathtool --totp -b "$totp_secret")
-                else
-                    totp=$(bw get totp "$item_id")
-                fi
-            else
-                totp="No TOTP available"
-            fi
+            totp_secret=$(jq -r ".login.totp // empty" <<< "$item")
+            totp=$(python3 -c "$PYTHON_TOTP_SCRIPT" "$totp_secret")
 
             bold=$(tput bold)
             normal=$(tput sgr0)
@@ -359,6 +370,11 @@ function main() {
   # Check for clipboard command availability
   if ! command -v $CLIP_COMMAND >/dev/null; then
     echo "WARNING: $CLIP_COMMAND is missing. Copy functionality will be unavailable"
+  fi
+
+  if ! command -v python3 >/dev/null; then
+    echo "python3 is missing. Exiting"
+    exit 1
   fi
 
   monitor_inactivity
