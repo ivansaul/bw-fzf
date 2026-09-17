@@ -261,17 +261,24 @@ function bw_list() {
 }
 
 function install_script() {
-  local install_path="/usr/local/bin/bw-fzf"
+  local install_dir="$HOME/.local/bin"
+  local install_path="$install_dir/bw-fzf"
 
-  if [[ "$EUID" -ne 0 ]]; then
-    echo "This script must be run as root. Try using sudo."
-    exit 1
+  if [[ ! -d "$install_dir" ]]; then
+    mkdir -p "$install_dir"
   fi
 
   if cp "$0" "$install_path" && chmod +x "$install_path"; then
     echo "Successfully installed to $install_path"
+    case ":$PATH:" in
+      *":$install_dir:"*) ;;
+      *)
+        echo "Add this line to ~/.bashrc or ~/.zshrc"
+        echo "export PATH=\"\$HOME/.local/bin:\$PATH\""
+        ;;
+    esac
   else
-    echo "Failed to install. Check your permissions."
+    echo "Failed to install to $install_path"
     exit 1
   fi
 }
@@ -284,7 +291,7 @@ function help() {
   echo "Usage: bw-fzf [OPTIONS]"
   echo
   echo "Options:"
-  echo "  -i, --install    Install the script to /usr/local/bin"
+  echo "  -i, --install    Install the script to ~/.local/bin"
   echo "  -h, --help       Show this help message"
   echo "  -t, --timeout    Set custom timeout (e.g., 30s, 1m). Default is 1 minute."
   echo "  -s, --search     Search term to filter items"
