@@ -46,12 +46,23 @@ function cleanup() {
 function monitor_inactivity() {
   rm -f "$TIMESTAMP_FILE"
   touch "$TIMESTAMP_FILE"
+
+  local timeout_sec
+  case "$TIMEOUT" in
+    *s) timeout_sec="${TIMEOUT%s}" ;;
+    *m) timeout_sec=$((${TIMEOUT%m} * 60)) ;;
+    *h) timeout_sec=$((${TIMEOUT%h} * 3600)) ;;
+    *)  timeout_sec="$TIMEOUT" ;;
+  esac
+
   while true; do
     sleep 1
     if [[ -f "$TIMESTAMP_FILE" ]]; then
       mod_time=$(date -r "$TIMESTAMP_FILE" +%s 2>/dev/null || stat -f %m "$TIMESTAMP_FILE" 2>/dev/null || stat -c %Y "$TIMESTAMP_FILE" 2>/dev/null)
-      time_diff=$(expr "$(date +%s)" - "$mod_time")
-      if [[ $time_diff -ge ${TIMEOUT%s} ]]; then
+      current_time=$(date +%s)
+      time_diff=$((current_time - mod_time))
+
+      if [[ $time_diff -ge $timeout_sec ]]; then
         echo -e "\nSession timed out after ${TIMEOUT}"
         cleanup
         exit 1
@@ -293,7 +304,7 @@ function help() {
   echo "Options:"
   echo "  -i, --install    Install the script to ~/.local/bin"
   echo "  -h, --help       Show this help message"
-  echo "  -t, --timeout    Set custom timeout (e.g., 30s, 1m). Default is 1 minute."
+  echo "  -t, --timeout    Set custom timeout (e.g., 30s, 2m, 1h). Default is 60s."
   echo "  -s, --search     Search term to filter items"
   echo "  -n, --no-preview Disable preview window"
   echo
